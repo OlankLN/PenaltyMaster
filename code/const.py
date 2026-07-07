@@ -98,6 +98,7 @@ BAR_SPEED_INCREMENT = 1.5   # aumenta a cada cobranca (fica mais dificil)
 MAX_KICKS = 5
 GOALS_TO_WIN = 3
 SAVES_TO_LOSE = 3
+MAX_NAME_LENGTH = 10  # quantidade maxima de caracteres no nome do jogador
 
 # Duracao das animacoes (ms)
 KICK_ANIM_DURATION = 500
@@ -110,4 +111,4 @@ FONT_HUD = 20
 FONT_RESULT = 36
 
 # Menu
-MENU_OPTION = ('START GAME', 'EXIT')
+MENU_OPTION = ('1 PLAYER', '2 PLAYERS', 'EXIT')

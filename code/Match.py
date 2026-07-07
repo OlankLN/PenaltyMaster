@@ -3,6 +3,7 @@ import sys
 import pygame
 from pygame import Surface, Rect
 from pygame.font import Font
+from code.Player import Player
 
 from const import (
     WIN_WIDTH, WIN_HEIGHT, C_WHITE, C_BLACK, C_YELLOW, C_RED, C_GRAY, C_GREEN_FIELD,
@@ -27,13 +28,14 @@ class Match:
       'done'      -> partida encerrada (3 gols ou 3 defesas ou 5 cobrancas)
     """
 
-    def __init__(self, window: Surface):
+    def __init__(self, window: Surface, player_names: list):
         self.window = window
         self._load_assets()
 
-        self.kick_number = 0
-        self.player_goals = 0
-        self.keeper_saves = 0
+        # cria um objeto Player pra cada nome da lista (1 ou 2 jogadores)
+        self.players = [Player(name) for name in player_names]
+        self.num_players = len(self.players)
+        self.current_player_index = 0
 
         self.bar_width = BAR_RIGHT - BAR_LEFT
         self.bar_pos = 0.0
@@ -91,14 +93,28 @@ class Match:
             pygame.display.flip()
 
             if self.state == 'done':
-                return self.player_goals >= GOALS_TO_WIN
+                return self._build_result()
+
+    def _build_result(self) -> dict:
+        if self.num_players == 1:
+            pl = self.players[0]
+            winner_index = 0 if pl.goals >= GOALS_TO_WIN else None
+        else:
+            p0, p1 = self.players
+            winner_index = 0 if p0.goals > p1.goals else 1  # nesse ponto, ja sabemos que nao ha empate
+
+        return {
+            'players': self.players,
+            'winner_index': winner_index,
+        }
 
     # ------------------------------------------------------------------
     # Logica
     # ------------------------------------------------------------------
 
     def _bar_speed(self) -> float:
-        return BAR_BASE_SPEED + self.kick_number * BAR_SPEED_INCREMENT
+        total_kicks = sum(p.kicks_taken for p in self.players)
+        return BAR_BASE_SPEED + total_kicks * BAR_SPEED_INCREMENT
 
     def _update(self):
         if self.state == 'aiming':
@@ -142,27 +158,57 @@ class Match:
         self.state_start_time = pygame.time.get_ticks()
 
     def _resolve_kick(self):
+        current = self.players[self.current_player_index]
         self.is_goal = self.chosen_zone != self.keeper_zone
         if self.is_goal:
-            self.player_goals += 1
-            self.result_text = 'GOOOL!'
+            current.goals += 1
+            self.result_text = f'GOOOL! ({current.name})'
         else:
-            self.keeper_saves += 1
-            self.result_text = 'DEFENDEU!'
+            current.saves_against += 1
+            self.result_text = f'DEFENDEU! ({current.name})'
         self.state = 'result'
         self.state_start_time = pygame.time.get_ticks()
 
     def _next_kick_or_finish(self):
-        self.kick_number += 1
-        if (self.player_goals >= GOALS_TO_WIN or
-                self.keeper_saves >= SAVES_TO_LOSE or
-                self.kick_number >= MAX_KICKS):
+        current = self.players[self.current_player_index]
+        current.kicks_taken += 1
+
+        if self._is_match_over():
             self.state = 'done'
         else:
+            self._advance_turn()
             self.bar_pos = 0.0
             self.bar_dir = 1
             self.state = 'aiming'
             self.keeper_zone = None
+
+    def _is_match_over(self) -> bool:
+        if self.num_players == 1:
+            pl = self.players[0]
+            return (pl.goals >= GOALS_TO_WIN or
+                    pl.saves_against >= SAVES_TO_LOSE or
+                    pl.kicks_taken >= MAX_KICKS)
+
+        # modo 2 jogadores
+        p0, p1 = self.players
+
+        # so avalia o fim quando os DOIS ja bateram a mesma quantidade de
+        # cobrancas (senao a partida terminaria no meio de uma rodada,
+        # com um jogador tendo cobrado uma vez a mais que o outro)
+        if p0.kicks_taken != p1.kicks_taken:
+            return False
+
+        # fase regular: precisa completar as 5 cobrancas de cada um
+        if p0.kicks_taken < MAX_KICKS:
+            return False
+
+        # depois de 5 cobrancas cada (ou mais, em "morte subita"),
+        # so termina quando o placar deixa de estar empatado
+        return p0.goals != p1.goals
+
+    def _advance_turn(self):
+        if self.num_players == 2:
+            self.current_player_index = (self.current_player_index + 1) % 2
 
     # ------------------------------------------------------------------
     # Desenho
@@ -198,11 +244,20 @@ class Match:
         pygame.draw.rect(self.window, C_RED, Rect(marker_x - 3, BAR_Y - 6, 6, BAR_HEIGHT + 12))
 
         # HUD
-        self._text(FONT_HUD, f'Gols: {self.player_goals}/{GOALS_TO_WIN}', C_YELLOW, (100, BG_HEIGHT + 25))
-        self._text(FONT_HUD, f'Defesas: {self.keeper_saves}/{SAVES_TO_LOSE}', C_YELLOW,
-                   (WIN_WIDTH - 100, BG_HEIGHT + 25))
-        self._text(FONT_HUD, f'Cobranca {min(self.kick_number + 1, MAX_KICKS)}/{MAX_KICKS}',
-                   C_WHITE, (WIN_WIDTH / 2, BG_HEIGHT + 25))
+        if self.num_players == 1:
+            pl = self.players[0]
+            self._text(FONT_HUD, f'{pl.name} - Gols: {pl.goals}/{GOALS_TO_WIN}', C_YELLOW,
+                       (100, BG_HEIGHT + 25))
+            self._text(FONT_HUD, f'Defesas: {pl.saves_against}/{SAVES_TO_LOSE}', C_YELLOW,
+                       (WIN_WIDTH - 100, BG_HEIGHT + 25))
+            self._text(FONT_HUD, f'Cobranca {min(pl.kicks_taken + 1, MAX_KICKS)}', C_WHITE,
+                       (WIN_WIDTH / 2, BG_HEIGHT + 25))
+        else:
+            p0, p1 = self.players
+            self._text(FONT_HUD, f'{p0.name}: {p0.goals} gols', C_YELLOW, (150, BG_HEIGHT + 25))
+            self._text(FONT_HUD, f'{p1.name}: {p1.goals} gols', C_YELLOW, (WIN_WIDTH - 150, BG_HEIGHT + 25))
+            vez_de = self.players[self.current_player_index].name
+            self._text(FONT_HUD, f'Vez de: {vez_de}', C_WHITE, (WIN_WIDTH / 2, BG_HEIGHT + 25))
 
         if self.state == 'aiming':
             self._text(FONT_HUD, 'ESPACO - Travar a barra', C_WHITE, (WIN_WIDTH / 2, BAR_Y + 45))
